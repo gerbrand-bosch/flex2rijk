@@ -73,6 +73,9 @@ Op Linux en Windows kan elk proces dat onder jouw account draait het opgeslagen 
 # Bij de eerste keer wordt Chromium automatisch geïnstalleerd
 flex2rijk
 
+# Start in-browser versie van Citrix (light mode)
+flex2rijk --light
+
 # Debug modus (browser zichtbaar)
 flex2rijk --no-headless
 
