@@ -9,6 +9,8 @@ DISCLAIMER: Deze tool is niet geassocieerd met flex2rijk.nl. Gebruik is op eigen
 De auteur biedt geen support en is niet verantwoordelijk voor eventueel verlies van data.
 """
 
+from threading import Event
+
 import argparse
 import configparser
 import contextlib
@@ -303,15 +305,18 @@ def _migrate_macos_password() -> str | None:
     return password
 
 
-def login(headless: bool = True, otp: str | None = None) -> None:
+def login(headless: bool = True, light: bool = False, otp: str | None = None) -> None:
     """Voer de volledige login-flow uit."""
     username = keychain_get("username") or input("Gebruikersnaam: ").strip()
     password = _read_password()
 
     print(f"[✓] Credentials geladen voor: {username}")
+    if light:
+        _run_browser(headless, light, username, password, otp)
+        return
 
     with tempfile.TemporaryDirectory(prefix="flex2rijk_") as download_dir:
-        ica_path = _run_browser(headless, username, password, otp, Path(download_dir))
+        ica_path = _run_browser(headless, False, username, password, otp, Path(download_dir))
 
         if ica_path:
             open_ica(ica_path)
@@ -323,7 +328,12 @@ def login(headless: bool = True, otp: str | None = None) -> None:
 
 
 def _run_browser(
-    headless: bool, username: str, password: str, otp: str | None, download_dir: Path
+    headless: bool,
+    light: bool,
+    username: str,
+    password: str,
+    otp: str | None,
+    download_dir: Path | None = None,
 ) -> Path | None:
     """Start de browser en voer de login uit."""
     _ensure_playwright_browsers()
@@ -339,7 +349,7 @@ def _run_browser(
         _perform_page_login(page, username, password, otp)
 
         print("[→] Wachten op Citrix sessie / ICA download...")
-        ica_path = _wait_for_ica(page, download_dir)
+        ica_path = _wait_for_ica(page, download_dir, light)
 
         browser.close()
         return ica_path
@@ -391,7 +401,7 @@ def _perform_page_login(page: Any, username: str, password: str, otp: str | None
 # ── Page interaction helpers ──────────────────────────────────────────────────
 
 
-def _wait_for_ica(page: Any, download_dir: Path) -> Path | None:
+def _wait_for_ica(page: Any, download_dir: Path, light: bool = False) -> Path | None:
     """Wacht tot de login redirect naar de store leidt en vang de ICA download op."""
     from playwright.sync_api import TimeoutError as PWTimeout  # noqa: PLC0415
 
@@ -399,6 +409,10 @@ def _wait_for_ica(page: Any, download_dir: Path) -> Path | None:
     try:
         # 1. Klik op detectie
         _handle_detect_button(page)
+
+        if light:
+            _handle_light_button(page)
+            return None
 
         # 2. Klik op 'Already installed' en vang download op
         with page.expect_download(timeout=20000) as dl_info:
@@ -435,6 +449,16 @@ def _handle_detect_button(page: Any) -> None:
         pass
 
 
+def _handle_light_button(page: Any) -> None:
+    """Klik op de 'light version knop."""
+    light_version = page.get_by_role("link", name="Use light version")
+    light_version.wait_for(state="visible", timeout=10000)
+    print("[→] 'Use light version' gevonden, klikken...")
+    light_version.click()
+    print("[→] 'Light version blijft draaien tot dit process gestopt wordt.")
+    Event().wait()
+
+
 def _handle_install_button(page: Any) -> None:
     """Klik op de 'Already installed' knop."""
     installed = page.get_by_role("link", name="Already installed")
@@ -454,6 +478,7 @@ def main() -> None:
     parser.add_argument("token", nargs="?", help="OneSpan token")
     parser.add_argument("--setup", action="store_true", help="Sla credentials op")
     parser.add_argument("--no-headless", action="store_true", help="Toon de browser")
+    parser.add_argument("--light", action="store_true", help="Login met de browser")
     parser.add_argument(
         "--no-store",
         action="store_true",
@@ -466,7 +491,7 @@ def main() -> None:
     if args.setup:
         setup(store=not args.no_store)
     else:
-        login(headless=not args.no_headless, otp=args.token)
+        login(headless=not args.no_headless, light=args.light, otp=args.token)
 
 
 if __name__ == "__main__":
